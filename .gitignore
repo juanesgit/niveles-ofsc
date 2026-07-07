@@ -1,0 +1,7 @@
+venv/
+edge_perfil/
+__pycache__
+*.log
+*.json
+*.png
+.env

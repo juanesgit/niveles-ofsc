@@ -1,0 +1,18 @@
+# Normalizar line endings
+* text=auto
+
+# Scripts de shell siempre con LF (para que funcionen en Linux/LXC)
+*.sh text eol=lf
+
+# Archivos Python con LF
+*.py text eol=lf
+
+# Archivos de texto normales
+*.md text eol=lf
+*.txt text eol=lf
+*.env text eol=lf
+
+# Binarios — no tocar
+*.png binary
+*.zip binary
+*.exe binary
