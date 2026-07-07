@@ -13,7 +13,7 @@
 set -euo pipefail
 
 # ── Configuración ─────────────────────────────────────────────────
-GIT_REPO="${1:-https://github.com/juanesgit/niveles-ofsc.git}"
+GIT_REPO="${1:-https://github.com/juanesgit/niveles-ofsc.git}"  # URL real del repo
 INSTALL_DIR="/root/niveles-ofsc"
 VENV_DIR="$INSTALL_DIR/.venv"
 SERVICE_NAME="niveles-ofsc"
