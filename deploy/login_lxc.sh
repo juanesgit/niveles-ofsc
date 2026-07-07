@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # ══════════════════════════════════════════════════════════════════
 #  niveles-ofsc — Login manual de cookies en el LXC
-#  Ejecuta oracle.py --login con display virtual (Xvfb).
-#  Requiere que el LXC tenga acceso X11/VNC para ver la ventana
-#  de Edge, o bien que uses SSH con X11 forwarding:
-#    ssh -X root@<ip-lxc>
+#
+#  En el LXC usa Chrome con Selenium Manager (headless=false).
+#  Para ver la ventana de Chrome necesitas acceso gráfico:
+#    - SSH con X11 forwarding:  ssh -X root@<ip-lxc>
+#    - noVNC / consola Proxmox
+#
+#  Uso:
 #    bash /root/niveles-ofsc/deploy/login_lxc.sh
 # ══════════════════════════════════════════════════════════════════
 set -euo pipefail
@@ -17,25 +20,14 @@ GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 info() { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn() { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 
-# Detener el bot para liberar el perfil de Edge
-info "Deteniendo bot temporalmente para liberar perfil de Edge..."
+info "Deteniendo bot temporalmente..."
 systemctl stop "$SERVICE_NAME" || true
 sleep 2
 
-# Asegurar que Xvfb esté corriendo
-if ! pgrep -x Xvfb &>/dev/null; then
-    info "Iniciando Xvfb en :99..."
-    Xvfb :99 -screen 0 1920x1080x24 &
-    sleep 1
-fi
-
-export DISPLAY=:99
-
-info "Iniciando renovación manual de cookies..."
-warn "Necesitas ver la ventana de Edge. Opciones:"
-warn "  - SSH con X11 forwarding: ssh -X root@<ip-lxc>"
-warn "  - VNC conectado al LXC"
-warn "  - noVNC desde Proxmox"
+info "Iniciando renovación de cookies con Chrome visible..."
+warn "Necesitas ver la ventana de Chrome. Opciones:"
+warn "  - SSH con X11:   ssh -X root@<ip-lxc>  y luego ejecuta este script"
+warn "  - noVNC/Proxmox: abre la consola del LXC y ejecuta este script"
 echo ""
 
 cd "$INSTALL_DIR"
@@ -49,6 +41,6 @@ if [[ $RC -eq 0 ]]; then
     sleep 2
     systemctl status "$SERVICE_NAME" --no-pager -l
 else
-    warn "La renovación de cookies falló (rc=$RC)."
-    warn "El bot NO se reiniciará. Revisa los logs y vuelve a intentarlo."
+    warn "La renovación falló (rc=$RC). Revisa los logs:"
+    warn "  journalctl -u $SERVICE_NAME -n 30 --no-pager"
 fi

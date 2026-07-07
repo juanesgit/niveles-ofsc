@@ -4,18 +4,26 @@ import time
 import json
 import logging
 import threading
+from pathlib import Path
 
 from dotenv import load_dotenv
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 
 from selenium import webdriver
-from selenium.webdriver.edge.service import Service
-from selenium.webdriver.edge.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException
+
+IS_WINDOWS = os.name == "nt"
+
+if IS_WINDOWS:
+    from selenium.webdriver.edge.service import Service
+    from selenium.webdriver.edge.options import Options
+else:
+    from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.chrome.options import Options
 
 # ─────────────────────────────────────────────────────
 # ENTORNO
@@ -47,7 +55,7 @@ log = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-PERFIL_EDGE          = os.path.join(BASE_DIR, "edge_perfil")
+PERFIL_BROWSER       = os.path.join(BASE_DIR, "browser_perfil")
 COOKIES_FILE         = os.path.join(BASE_DIR, "oracle_cookies.json")
 MSEDGEDRIVER_MANUAL  = os.path.join(BASE_DIR, "msedgedriver.exe")
 SCREENSHOTS_MAX      = 10   # máximo de screenshots de error a conservar
@@ -157,28 +165,42 @@ _driver_lock = threading.Lock()
 
 def _crear_service():
     """
-    Intenta obtener el msedgedriver en este orden:
-      1. webdriver-manager (descarga automática si hay internet)
-      2. msedgedriver.exe en la misma carpeta del script
-      3. msedgedriver en el PATH del sistema
+    Obtiene el driver correcto según el SO:
+    - Windows → msedgedriver (Edge)
+    - Linux/LXC → chromedriver (Chrome, igual que BotCCOT)
+
+    Orden de búsqueda en Windows:
+      1. webdriver-manager (descarga automática)
+      2. msedgedriver.exe local
+      3. PATH del sistema
+
+    Orden en Linux:
+      1. Selenium Manager (automático, incluido en Selenium 4.x)
+      2. chromedriver en el PATH
     """
-    # 1. webdriver-manager
-    try:
-        from webdriver_manager.microsoft import EdgeChromiumDriverManager
-        ruta = EdgeChromiumDriverManager().install()
-        log.info(f"✅ msedgedriver via webdriver-manager: {ruta}")
-        return Service(ruta)
-    except Exception as e:
-        log.warning(f"⚠️ webdriver-manager falló: {e}")
-
-    # 2. Archivo local
-    if os.path.isfile(MSEDGEDRIVER_MANUAL):
-        log.info(f"✅ msedgedriver local: {MSEDGEDRIVER_MANUAL}")
-        return Service(MSEDGEDRIVER_MANUAL)
-
-    # 3. PATH del sistema (comportamiento por defecto de Selenium)
-    log.info("✅ Usando msedgedriver del PATH del sistema")
-    return Service()
+    if IS_WINDOWS:
+        # ─ Windows: Edge ───────────────────────────────────────
+        try:
+            from webdriver_manager.microsoft import EdgeChromiumDriverManager
+            ruta = EdgeChromiumDriverManager().install()
+            log.info(f"✅ msedgedriver via webdriver-manager: {ruta}")
+            return Service(ruta)
+        except Exception as e:
+            log.warning(f"⚠️ webdriver-manager falló: {e}")
+        if os.path.isfile(MSEDGEDRIVER_MANUAL):
+            log.info(f"✅ msedgedriver local: {MSEDGEDRIVER_MANUAL}")
+            return Service(MSEDGEDRIVER_MANUAL)
+        log.info("✅ Usando msedgedriver del PATH del sistema")
+        return Service()
+    else:
+        # ─ Linux/LXC: Chrome (igual que BotCCOT) ──────────────────
+        import shutil
+        pth = shutil.which("chromedriver")
+        if pth:
+            log.info(f"✅ chromedriver del PATH: {pth}")
+            return Service(pth)
+        log.info("✅ Usando Selenium Manager para chromedriver (descarga automática)")
+        return Service()
 
 
 def obtener_driver():
@@ -222,42 +244,52 @@ def obtener_driver():
 
         options = Options()
 
-        # 1. Modo InPrivate y bloqueo de SSO de Windows:
-        #    SOLO si NO queremos usar el SSO silencioso del equipo.
-        #    Si el PC está unido al dominio corporativo (Azure AD Joined /
-        #    Hybrid Joined), es mejor NO bloquear esto: permite renovar la
-        #    sesión sin pedir contraseña/MFA de nuevo cuando el token expire.
-        if not PERMITIR_SSO_SILENCIOSO_WINDOWS:
-            options.add_argument("-inprivate")
-            options.add_argument(
-                "--disable-features=msEdgeProfileSigninConstraints,msSingleSignOnOSExchange"
-            )
+        if IS_WINDOWS:
+            # ─ Windows: opciones específicas de Edge ──────────────────
+            if not PERMITIR_SSO_SILENCIOSO_WINDOWS:
+                options.add_argument("-inprivate")
+                options.add_argument(
+                    "--disable-features=msEdgeProfileSigninConstraints,msSingleSignOnOSExchange"
+                )
+            options.add_argument(f"--user-data-dir={PERFIL_BROWSER}")
+            options.add_argument("--profile-directory=Default")
+            options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            options.add_experimental_option("useAutomationExtension", False)
+        else:
+            # ─ Linux/LXC: opciones de Chrome (igual que BotCCOT) ─────
+            import shutil, tempfile
+            chrome_data = Path(tempfile.gettempdir()) / "oracle-chrome-data"
+            try:
+                chrome_data.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            options.add_argument(f"--user-data-dir={chrome_data}")
+            options.add_argument("--disable-extensions")
+            options.add_argument("--disable-plugins")
+            options.add_argument("--disable-notifications")
+            options.add_argument("--disable-geolocation")
+            options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            options.add_experimental_option("useAutomationExtension", False)
 
-        # 2. PERFIL DE EDGE: ¡IMPORTANTE! Asegúrate de que esta ruta sea LOCAL (Fuera de OneDrive)
-        # Ejemplo recomendado para PERFIL_EDGE: "C:\\BotTelegram\\perfil_edge"
-        options.add_argument(f"--user-data-dir={PERFIL_EDGE}")
-        options.add_argument("--profile-directory=Default")
-
-        # 3. ARGUMENTOS DE ESTABILIDAD (Se aplican SIEMPRE para evitar crashes)
+        # ─ Argumentos comunes (Windows + Linux) ───────────────────
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
-        options.add_argument("--remote-debugging-port=9222")  # Ayuda a evitar el error de DevToolsActivePort
-
-        # 4. Configuración específica del modo Headless
-        if modo_headless:
-            options.add_argument("--headless=new")  # 'new' es el estándar moderno y más estable
-            options.add_argument("--window-size=1920,1080")
-
-        # Estas opciones van siempre
         options.add_argument("--disable-blink-features=AutomationControlled")
         options.add_argument("--start-maximized")
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_experimental_option("useAutomationExtension", False)
+
+        if modo_headless:
+            options.add_argument("--headless=new")
+            options.add_argument("--window-size=1920,1080")
 
         service = _crear_service()
 
-        _driver = webdriver.Edge(service=service, options=options)
+        if IS_WINDOWS:
+            log.info("🖥️ Iniciando Microsoft Edge (Windows)")
+            _driver = webdriver.Edge(service=service, options=options)
+        else:
+            log.info("🖥️ Iniciando Google Chrome (Linux/LXC)")
+            _driver = webdriver.Chrome(service=service, options=options)
 
         _driver.execute_script("""
             Object.defineProperty(
@@ -267,10 +299,11 @@ def obtener_driver():
             )
         """)
 
+        browser_name = "Edge" if IS_WINDOWS else "Chrome"
         if modo_headless:
-            log.info("✅ Edge HEADLESS iniciado correctamente (sin ventana visible)")
+            log.info(f"✅ {browser_name} HEADLESS iniciado correctamente")
         else:
-            log.info("✅ Edge VISIBLE iniciado - AHORA HAZ LOGIN MANUAL CON MFA (solo esta vez)")
+            log.info(f"✅ {browser_name} VISIBLE iniciado - HAZ LOGIN MANUAL CON MFA")
 
         log.info(f"🌐 URL Oracle: {URL_ORACLE} | Usuario: {USUARIO}")
         return _driver
@@ -535,14 +568,23 @@ def renovar_cookies_manual(timeout: int = 300) -> bool:
 
     options = Options()
 
-    if not PERMITIR_SSO_SILENCIOSO_WINDOWS:
-        options.add_argument("-inprivate")
-        options.add_argument(
-            "--disable-features=msEdgeProfileSigninConstraints,msSingleSignOnOSExchange"
-        )
+    if IS_WINDOWS:
+        if not PERMITIR_SSO_SILENCIOSO_WINDOWS:
+            options.add_argument("-inprivate")
+            options.add_argument(
+                "--disable-features=msEdgeProfileSigninConstraints,msSingleSignOnOSExchange"
+            )
+        options.add_argument(f"--user-data-dir={PERFIL_BROWSER}")
+        options.add_argument("--profile-directory=Default")
+    else:
+        import shutil, tempfile
+        chrome_data = Path(tempfile.gettempdir()) / "oracle-chrome-login"
+        try:
+            chrome_data.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        options.add_argument(f"--user-data-dir={chrome_data}")
 
-    options.add_argument(f"--user-data-dir={PERFIL_EDGE}")
-    options.add_argument("--profile-directory=Default")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
@@ -552,7 +594,10 @@ def renovar_cookies_manual(timeout: int = 300) -> bool:
     options.add_experimental_option("useAutomationExtension", False)
 
     service = _crear_service()
-    driver_tmp = webdriver.Edge(service=service, options=options)
+    if IS_WINDOWS:
+        driver_tmp = webdriver.Edge(service=service, options=options)
+    else:
+        driver_tmp = webdriver.Chrome(service=service, options=options)
 
     try:
         driver_tmp.execute_script("""
@@ -647,7 +692,10 @@ def _verificar_cookies_validas() -> bool:
     options.add_experimental_option("useAutomationExtension", False)
 
     service = _crear_service()
-    driver_chk = webdriver.Edge(service=service, options=options)
+    if IS_WINDOWS:
+        driver_chk = webdriver.Edge(service=service, options=options)
+    else:
+        driver_chk = webdriver.Chrome(service=service, options=options)
     try:
         cargar_cookies(driver_chk)
         return _dentro_de_oracle(driver_chk)
