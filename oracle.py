@@ -409,8 +409,10 @@ def cargar_cookies(driver):
 
         for dominio, lote in por_dominio.items():
             try:
-                driver.get(f"https://{dominio}")
-                time.sleep(1)
+                # Navegar a favicon.ico — recurso estático que NO redirije a SSO
+                # Así el browser está en el dominio correcto para add_cookie sin triggear login
+                driver.get(f"https://{dominio}/favicon.ico")
+                time.sleep(0.5)
             except Exception as e:
                 log.warning(f"⚠️ No se pudo visitar dominio {dominio} para cargar sus cookies: {e}")
                 continue
