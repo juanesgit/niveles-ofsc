@@ -623,6 +623,7 @@ def _verificar_cookies_validas() -> bool:
             )
         r = s.get(URL_ORACLE, timeout=15, allow_redirects=True)
         body = r.text[:500].lower()
+        log.info(f"[VERIFY] status={r.status_code} url={r.url[:80]} body_preview={r.text[:120]!r}")
         # Si hay login/username en la respuesta → sesión expirada
         if "username" in body or "login" in body or "sign in" in body:
             return False
