@@ -50,8 +50,9 @@ log = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-COOKIES_FILE    = os.path.join(BASE_DIR, "oracle_cookies.json")
-SCREENSHOTS_MAX = 10   # máximo de screenshots de error a conservar
+COOKIES_FILE      = os.path.join(BASE_DIR, "oracle_cookies.json")
+USER_AGENT_FILE   = os.path.join(BASE_DIR, "oracle_user_agent.txt")
+SCREENSHOTS_MAX   = 10   # máximo de screenshots de error a conservar
 
 URL_ORACLE  = os.getenv("ORACLE_URL",     "https://amx-res-co.fs.ocs.oraclecloud.com/")
 USUARIO     = os.getenv("ORACLE_USUARIO", "38101491@claro.com.co")
@@ -166,6 +167,15 @@ def _crear_chrome(headless: bool = False) -> webdriver.Chrome:
     options = webdriver.ChromeOptions()
     if headless:
         options.add_argument("--headless=new")
+    # Usar el mismo User-Agent con el que se generaron las cookies (igual que BotCCOT)
+    if os.path.exists(USER_AGENT_FILE):
+        try:
+            with open(USER_AGENT_FILE) as f:
+                ua = f.read().strip()
+            if ua:
+                options.add_argument(f"--user-agent={ua}")
+        except Exception:
+            pass
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--remote-debugging-port=0")
@@ -573,6 +583,11 @@ def renovar_cookies_manual(timeout: int = 300) -> bool:
         cookies = driver_tmp.get_cookies()
         with open(COOKIES_FILE, "w") as f:
             json.dump(cookies, f, indent=2)
+        ua = driver_tmp.execute_script("return navigator.userAgent;")
+        if ua:
+            with open(USER_AGENT_FILE, "w") as f:
+                f.write(ua)
+            log.info(f"✅ User-Agent guardado: {ua[:80]}")
         log.info(f"✅ Cookies renovadas y guardadas ({len(cookies)} cookies)")
         return True
 
