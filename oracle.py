@@ -194,11 +194,17 @@ def _crear_chrome(headless: bool = False, login_temp: bool = False) -> webdriver
     options.add_experimental_option("useAutomationExtension", False)
 
     if login_temp:
-        # Login: perfil persistente para guardar sesión SSO de Microsoft
+        # Login: perfil persistente para guardar sesión SSO
         data_dir = Path(BROWSER_PERFIL)
         data_dir.mkdir(parents=True, exist_ok=True)
+        # Limpiar lock files que bloquean si Chrome cerró mal
+        for lock in ["SingletonLock", "SingletonCookie", "SingletonSocket"]:
+            try:
+                (data_dir / lock).unlink(missing_ok=True)
+            except Exception:
+                pass
     else:
-        # Búsquedas: directorio temporal limpio — las cookies se inyectan desde JSON
+        # Búsquedas: directorio temporal SIEMPRE limpio — cookies via CDP
         if os.name != "nt":
             data_dir = Path("/tmp/oracle-chrome-data")
         else:
@@ -434,7 +440,9 @@ def cargar_cookies(driver):
 
         # Navegar a Oracle — las cookies ya están inyectadas a nivel de red
         driver.get(URL_ORACLE)
-        time.sleep(2)
+        time.sleep(3)
+        log.info(f"[CARGAR_COOKIES] URL actual tras navegar: {driver.current_url}")
+        log.info(f"[CARGAR_COOKIES] Título: {driver.title}")
 
         log.info(f"✅ Cookies cargadas ({total_cargadas}/{len(cookies)} cookies)")
         return total_cargadas > 0
