@@ -193,13 +193,21 @@ def _crear_chrome(headless: bool = False) -> webdriver.Chrome:
         pass
     options.add_argument(f"--user-data-dir={data_dir}")
 
+    # Igual que BotCCOT: intentar primero con chromedriver del PATH
+    pth = shutil.which("chromedriver")
+    if pth:
+        try:
+            driver = webdriver.Chrome(service=Service(pth), options=options)
+            return driver
+        except Exception:
+            pass
+    # Fallback: Selenium Manager (descarga automática si hay internet)
     try:
         driver = webdriver.Chrome(options=options)
         return driver
     except Exception:
         pass
-    pth = shutil.which("chromedriver") or "chromedriver"
-    driver = webdriver.Chrome(service=Service(pth), options=options)
+    driver = webdriver.Chrome(service=Service("chromedriver"), options=options)
     return driver
 
 
@@ -585,8 +593,9 @@ def renovar_cookies_manual(timeout: int = 300) -> bool:
 
 def _verificar_cookies_validas() -> bool:
     """
-    Verifica rápidamente si las cookies guardadas permiten acceder a Oracle
-    usando un driver headless temporal (no afecta el singleton).
+    Verifica cookies con requests HTTP (igual que BotCCOT ensure_authenticated).
+    Sin abrir Chrome — rápido e instantáneo.
+    Hace un GET a Oracle y verifica que la respuesta NO sea la página de login.
     """
     if not os.path.exists(COOKIES_FILE):
         return False
@@ -598,17 +607,30 @@ def _verificar_cookies_validas() -> bool:
     except Exception:
         return False
 
-    driver_chk = _crear_chrome(headless=True)
     try:
-        cargar_cookies(driver_chk)
-        return _dentro_de_oracle(driver_chk)
-    except Exception:
+        import requests as req
+        s = req.Session()
+        s.headers["User-Agent"] = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36"
+        )
+        s.headers["Referer"] = URL_ORACLE
+        for c in cookies:
+            s.cookies.set(
+                c.get("name"), c.get("value"),
+                domain=c.get("domain", "").lstrip("."),
+                path=c.get("path", "/")
+            )
+        r = s.get(URL_ORACLE, timeout=15, allow_redirects=True)
+        body = r.text[:500].lower()
+        # Si hay login/username en la respuesta → sesión expirada
+        if "username" in body or "login" in body or "sign in" in body:
+            return False
+        # Si llegó a Oracle (200 y sin login) → válidas
+        return r.status_code == 200
+    except Exception as e:
+        log.warning(f"[VERIFY] Error verificando cookies: {e}")
         return False
-    finally:
-        try:
-            driver_chk.quit()
-        except Exception:
-            pass
 
 
 def ensure_session() -> bool:
