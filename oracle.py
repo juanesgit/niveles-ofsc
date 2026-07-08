@@ -193,10 +193,18 @@ def _crear_chrome(headless: bool = False, login_temp: bool = False) -> webdriver
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
 
-    # Siempre usar el perfil persistente — contiene sesión SSO de Microsoft
-    # login_temp ya no se usa para el directorio, solo era para distinguir contexto
-    data_dir = Path(BROWSER_PERFIL)
-    data_dir.mkdir(parents=True, exist_ok=True)
+    if login_temp:
+        # Login: perfil persistente para guardar sesión SSO de Microsoft
+        data_dir = Path(BROWSER_PERFIL)
+        data_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        # Búsquedas: directorio temporal limpio — las cookies se inyectan desde JSON
+        if os.name != "nt":
+            data_dir = Path("/tmp/oracle-chrome-data")
+        else:
+            data_dir = Path(tempfile.gettempdir()) / "oracle-chrome-data"
+        shutil.rmtree(data_dir, ignore_errors=True)
+        data_dir.mkdir(parents=True, exist_ok=True)
     options.add_argument(f"--user-data-dir={data_dir}")
 
     # Igual que BotCCOT: intentar primero con chromedriver del PATH
@@ -697,34 +705,23 @@ def hacer_login(driver, force_login=False):
         log.info("🔐 Forzando renovación de cookies (force_login=True)...")
         renovar_cookies_manual()
 
-    log.info("🌐 Navegando a Oracle con perfil persistente...")
-    driver.get(URL_ORACLE)
+    # cargar_cookies: visita dominio → inyecta cookies → navega a Oracle (con cookies ya presentes)
+    log.info("🌐 Inyectando cookies y navegando a Oracle...")
+    if not cargar_cookies(driver):
+        log.warning("⚠️ No hay cookies guardadas — navegando sin cookies")
+        driver.get(URL_ORACLE)
 
-    # Esperar hasta 60s a que Oracle cargue (el perfil tiene sesión SSO guardada)
-    try:
-        WebDriverWait(driver, 60).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, SEL_BARRA_BUSQUEDA))
-        )
-        log.info("✅ Sesión activa — Oracle cargado con perfil persistente")
-        return True
-    except TimeoutException:
-        pass
-
-    # Si no cargó, intentar cargar cookies del JSON como fallback
-    log.warning("⚠️ Perfil no tiene sesión activa, intentando con cookies JSON...")
-    cargar_cookies(driver)
-    driver.get(URL_ORACLE)
     try:
         WebDriverWait(driver, 30).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, SEL_BARRA_BUSQUEDA))
         )
-        log.info("✅ Sesión restaurada con cookies JSON")
+        log.info("✅ Sesión activa en Oracle")
         return True
     except TimeoutException:
         pass
 
-    log.warning("⚠️ Oracle no cargó — se requiere MFA o renovación de sesión")
-    return True  # Continuar de todas formas, buscar_cuenta fallará con error claro
+    log.warning("⚠️ Oracle no cargó en 30s — continuando")
+    return True
 
 
 # ─────────────────────────────────────────────────────
