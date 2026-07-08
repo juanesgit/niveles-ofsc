@@ -701,14 +701,13 @@ def hacer_login(driver, force_login=False):
     if cargar_cookies(driver):
         driver.refresh()
         try:
-            WebDriverWait(driver, 10).until(
-                lambda d: d.execute_script("return document.readyState") == "complete"
+            WebDriverWait(driver, 30).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, SEL_BARRA_BUSQUEDA))
             )
-        except Exception:
-            pass
-        if _dentro_de_oracle(driver):
             log.info("✅ Sesión restaurada con cookies (sin MFA)")
             return True
+        except TimeoutException:
+            pass
         log.warning("⚠️ Cookies cargadas pero no funcionaron — renovando...")
 
     # Cookies fallaron: delegar al flujo ensure_session
