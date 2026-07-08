@@ -193,18 +193,10 @@ def _crear_chrome(headless: bool = False, login_temp: bool = False) -> webdriver
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
 
-    if login_temp:
-        # Para login: directorio temporal limpio (evita conflictos con perfil en uso)
-        if os.name != "nt":
-            data_dir = Path("/tmp/oracle-chrome-login")
-        else:
-            data_dir = Path(tempfile.gettempdir()) / "oracle-chrome-login"
-        shutil.rmtree(data_dir, ignore_errors=True)
-        data_dir.mkdir(parents=True, exist_ok=True)
-    else:
-        # Para búsquedas: perfil PERSISTENTE — mantiene sesión SSO de Microsoft
-        data_dir = Path(BROWSER_PERFIL)
-        data_dir.mkdir(parents=True, exist_ok=True)
+    # Siempre usar el perfil persistente — contiene sesión SSO de Microsoft
+    # login_temp ya no se usa para el directorio, solo era para distinguir contexto
+    data_dir = Path(BROWSER_PERFIL)
+    data_dir.mkdir(parents=True, exist_ok=True)
     options.add_argument(f"--user-data-dir={data_dir}")
 
     # Igual que BotCCOT: intentar primero con chromedriver del PATH
@@ -256,13 +248,12 @@ def obtener_driver():
             except Exception:
                 pass
 
-        if cookies_validas:
-            log.info("🚀 Iniciando Chrome VISIBLE (DEBUG: modo headless desactivado)")
-            modo_headless = False  # DEBUG: temporalmente visible para diagnosticar
+        # En LXC/Linux sin display → headless. En Windows → visible (para MFA si es necesario)
+        modo_headless = (os.name != "nt")
+        if modo_headless:
+            log.info("� Iniciando Chrome HEADLESS (Linux/LXC)")
         else:
-            log.info("🚨 PRIMERA VEZ - No hay cookies válidas")
-            log.info("🚀 Iniciando Chrome VISIBLE para login manual (solo esta vez)")
-            modo_headless = False
+            log.info("🚀 Iniciando Chrome VISIBLE (Windows — MFA disponible si es necesario)")
 
         _driver = _crear_chrome(headless=modo_headless)
 
@@ -274,10 +265,7 @@ def obtener_driver():
             )
         """)
 
-        if modo_headless:
-            log.info("✅ Chrome HEADLESS iniciado correctamente")
-        else:
-            log.info("✅ Chrome VISIBLE iniciado - HAZ LOGIN MANUAL CON MFA")
+        log.info(f"✅ Chrome iniciado ({'HEADLESS' if modo_headless else 'VISIBLE'}) con perfil persistente")
 
         log.info(f"🌐 URL Oracle: {URL_ORACLE} | Usuario: {USUARIO}")
         return _driver
@@ -709,23 +697,34 @@ def hacer_login(driver, force_login=False):
         log.info("🔐 Forzando renovación de cookies (force_login=True)...")
         renovar_cookies_manual()
 
-    # Igual que BotCCOT: inyectar cookies ANTES de navegar a Oracle
-    # cargar_cookies() visita el dominio, inyecta las cookies, y luego
-    # navegamos a Oracle con las cookies ya presentes → no hay redirect a Microsoft
-    log.info("🍪 Cargando cookies antes de navegar a Oracle...")
-    if cargar_cookies(driver):
-        log.info("🌐 Navegando a Oracle con cookies ya cargadas...")
-        driver.get(URL_ORACLE)
-        try:
-            WebDriverWait(driver, 30).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, SEL_BARRA_BUSQUEDA))
-            )
-            log.info("✅ Sesión restaurada con cookies (sin MFA)")
-            return True
-        except TimeoutException:
-            pass
-        log.warning("⚠️ Oracle no cargó la barra de búsqueda en 30s, continuando...")
+    log.info("🌐 Navegando a Oracle con perfil persistente...")
+    driver.get(URL_ORACLE)
+
+    # Esperar hasta 60s a que Oracle cargue (el perfil tiene sesión SSO guardada)
+    try:
+        WebDriverWait(driver, 60).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, SEL_BARRA_BUSQUEDA))
+        )
+        log.info("✅ Sesión activa — Oracle cargado con perfil persistente")
         return True
+    except TimeoutException:
+        pass
+
+    # Si no cargó, intentar cargar cookies del JSON como fallback
+    log.warning("⚠️ Perfil no tiene sesión activa, intentando con cookies JSON...")
+    cargar_cookies(driver)
+    driver.get(URL_ORACLE)
+    try:
+        WebDriverWait(driver, 30).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, SEL_BARRA_BUSQUEDA))
+        )
+        log.info("✅ Sesión restaurada con cookies JSON")
+        return True
+    except TimeoutException:
+        pass
+
+    log.warning("⚠️ Oracle no cargó — se requiere MFA o renovación de sesión")
+    return True  # Continuar de todas formas, buscar_cuenta fallará con error claro
 
 
 # ─────────────────────────────────────────────────────
