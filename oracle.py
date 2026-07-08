@@ -52,6 +52,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 COOKIES_FILE      = os.path.join(BASE_DIR, "oracle_cookies.json")
 USER_AGENT_FILE   = os.path.join(BASE_DIR, "oracle_user_agent.txt")
+BROWSER_PERFIL    = os.path.join(BASE_DIR, "browser_perfil")  # perfil persistente Chrome
 SCREENSHOTS_MAX   = 10   # máximo de screenshots de error a conservar
 
 URL_ORACLE  = os.getenv("ORACLE_URL",     "https://amx-res-co.fs.ocs.oraclecloud.com/")
@@ -157,7 +158,7 @@ _keepalive_t = None           # hilo keepalive
 _driver_lock = threading.Lock()
 
 
-def _crear_chrome(headless: bool = False) -> webdriver.Chrome:
+def _crear_chrome(headless: bool = False, login_temp: bool = False) -> webdriver.Chrome:
     """
     Crea un driver Chrome igual que BotCCOT:
     - Selenium Manager descarga chromedriver automáticamente
@@ -192,15 +193,18 @@ def _crear_chrome(headless: bool = False) -> webdriver.Chrome:
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
 
-    if os.name != "nt":
-        data_dir = Path("/tmp/oracle-chrome-data")
-    else:
-        data_dir = Path(tempfile.gettempdir()) / "oracle-chrome-data"
-    try:
+    if login_temp:
+        # Para login: directorio temporal limpio (evita conflictos con perfil en uso)
+        if os.name != "nt":
+            data_dir = Path("/tmp/oracle-chrome-login")
+        else:
+            data_dir = Path(tempfile.gettempdir()) / "oracle-chrome-login"
         shutil.rmtree(data_dir, ignore_errors=True)
         data_dir.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
+    else:
+        # Para búsquedas: perfil PERSISTENTE — mantiene sesión SSO de Microsoft
+        data_dir = Path(BROWSER_PERFIL)
+        data_dir.mkdir(parents=True, exist_ok=True)
     options.add_argument(f"--user-data-dir={data_dir}")
 
     # Igual que BotCCOT: intentar primero con chromedriver del PATH
@@ -253,8 +257,8 @@ def obtener_driver():
                 pass
 
         if cookies_validas:
-            log.info("🚀 Iniciando Chrome HEADLESS (ya hay cookies guardadas)")
-            modo_headless = True
+            log.info("🚀 Iniciando Chrome VISIBLE (DEBUG: modo headless desactivado)")
+            modo_headless = False  # DEBUG: temporalmente visible para diagnosticar
         else:
             log.info("🚨 PRIMERA VEZ - No hay cookies válidas")
             log.info("🚀 Iniciando Chrome VISIBLE para login manual (solo esta vez)")
@@ -534,7 +538,7 @@ def renovar_cookies_manual(timeout: int = 300) -> bool:
     """
     log.info("🔑 Iniciando renovación de cookies (Chrome visible)...")
 
-    driver_tmp = _crear_chrome(headless=False)
+    driver_tmp = _crear_chrome(headless=False, login_temp=False)
 
     try:
         driver_tmp.execute_script("""
@@ -993,8 +997,11 @@ if __name__ == "__main__":
         print("✅ Cookies válidas — sesión activa" if ok else "❌ Cookies inválidas o expiradas")
         sys.exit(0 if ok else 1)
 
-    # Test por defecto
-    cuenta_test = "50826808"
+    if "--buscar" in args:
+        idx = args.index("--buscar")
+        cuenta_test = args[idx + 1] if idx + 1 < len(args) else "50826808"
+    else:
+        cuenta_test = "50826808"
     resultado = buscar_cuenta(cuenta_test)
     print(f"\n{'='*50}")
     print(f"RESULTADO FINAL: {resultado}")
