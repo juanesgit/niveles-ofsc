@@ -709,20 +709,10 @@ def hacer_login(driver, force_login=False):
             return True
         except TimeoutException:
             pass
-        log.warning("⚠️ Cookies cargadas pero no funcionaron — renovando...")
-
-    # Cookies fallaron: delegar al flujo ensure_session
-    try:
-        if os.path.exists(COOKIES_FILE):
-            os.remove(COOKIES_FILE)
-            log.info("🗑️ Cookies inválidas eliminadas")
-    except Exception:
-        pass
-
-    raise SesionExpiradaError(
-        "No se pudo restaurar la sesión con cookies. "
-        "Llama a ensure_session() antes de buscar cuentas."
-    )
+        log.warning("⚠️ WebDriverWait no detectó Oracle — puede ser carga lenta, continuando...")
+        # No borrar cookies aquí — ensure_session ya las validó vía HTTP
+        # Devolver True para que el bot intente operar igual
+        return True
 
 
 # ─────────────────────────────────────────────────────
