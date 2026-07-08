@@ -267,6 +267,10 @@ def obtener_driver():
                 { get: () => undefined }
             )
         """)
+        try:
+            _driver.execute_cdp_cmd("Network.enable", {})
+        except Exception:
+            pass
 
         log.info(f"✅ Chrome iniciado ({'HEADLESS' if modo_headless else 'VISIBLE'}) con perfil persistente")
 
@@ -404,32 +408,31 @@ def cargar_cookies(driver):
 
         for dominio, lote in por_dominio.items():
             try:
-                # Navegar a favicon.ico — recurso estático que NO redirije a SSO
-                # Así el browser está en el dominio correcto para add_cookie sin triggear login
-                driver.get(f"https://{dominio}/favicon.ico")
-                time.sleep(0.5)
-            except Exception as e:
-                log.warning(f"⚠️ No se pudo visitar dominio {dominio} para cargar sus cookies: {e}")
-                continue
-
-            for cookie in lote:
-                cookie_limpia = dict(cookie)  # copia para no mutar el original
-                if 'expiry' in cookie_limpia:
+                # Inyectar cookies via CDP antes de navegar — evita el redirect SSO
+                # CDP ejecuta antes de que el servidor pueda responder con redirect
+                for cookie in lote:
+                    cdp_cookie = {
+                        "name": cookie.get("name", ""),
+                        "value": cookie.get("value", ""),
+                        "domain": cookie.get("domain", dominio),
+                        "path": cookie.get("path", "/"),
+                        "secure": cookie.get("secure", True),
+                        "httpOnly": cookie.get("httpOnly", False),
+                    }
+                    if "expiry" in cookie:
+                        try:
+                            cdp_cookie["expires"] = int(cookie["expiry"])
+                        except Exception:
+                            pass
                     try:
-                        cookie_limpia['expiry'] = int(cookie_limpia['expiry'])
-                    except Exception:
-                        cookie_limpia.pop('expiry', None)
+                        driver.execute_cdp_cmd("Network.setCookie", cdp_cookie)
+                        total_cargadas += 1
+                    except Exception as e:
+                        log.warning(f"No se pudo inyectar cookie CDP {cookie.get('name')}: {e}")
+            except Exception as e:
+                log.warning(f"⚠️ Error inyectando cookies de {dominio}: {e}")
 
-                # 'sameSite' a veces trae valores que Selenium/Edge rechaza
-                cookie_limpia.pop('sameSite', None)
-
-                try:
-                    driver.add_cookie(cookie_limpia)
-                    total_cargadas += 1
-                except Exception as e:
-                    log.warning(f"No se pudo cargar cookie {cookie.get('name')} ({dominio}): {e}")
-
-        # Volver siempre a Oracle al final, con todas las cookies ya puestas
+        # Navegar a Oracle — las cookies ya están inyectadas a nivel de red
         driver.get(URL_ORACLE)
         time.sleep(2)
 
@@ -531,7 +534,15 @@ def renovar_cookies_manual(timeout: int = 300) -> bool:
     """
     log.info("🔑 Iniciando renovación de cookies (Chrome visible)...")
 
-    driver_tmp = _crear_chrome(headless=False, login_temp=False)
+    global _driver
+    # Cerrar driver anterior si existe
+    if _driver is not None:
+        try:
+            _driver.quit()
+        except Exception:
+            pass
+        _driver = None
+    driver_tmp = _crear_chrome(headless=False, login_temp=True)
 
     try:
         driver_tmp.execute_script("""
@@ -576,7 +587,7 @@ def renovar_cookies_manual(timeout: int = 300) -> bool:
                 "Intenta de nuevo o revisa que el perfil de Edge tenga acceso a Oracle."
             )
 
-        time.sleep(2)   # pequeña pausa para que el navegador termine de persistir cookies
+        time.sleep(2)
         cookies = driver_tmp.get_cookies()
         with open(COOKIES_FILE, "w") as f:
             json.dump(cookies, f, indent=2)
@@ -586,17 +597,18 @@ def renovar_cookies_manual(timeout: int = 300) -> bool:
                 f.write(ua)
             log.info(f"✅ User-Agent guardado: {ua[:80]}")
         log.info(f"✅ Cookies renovadas y guardadas ({len(cookies)} cookies)")
+        # Guardar como singleton — el mismo Chrome sigue activo para búsquedas
+        _driver = driver_tmp
+        log.info("✅ Driver guardado como singleton — listo para búsquedas")
         return True
 
     except Exception as e:
         log.error(f"❌ Error en renovación manual de cookies: {e}")
-        return False
-    finally:
         try:
             driver_tmp.quit()
         except Exception:
             pass
-        log.info("🔒 Driver temporal cerrado")
+        return False
 
 
 # ─────────────────────────────────────────────────────
