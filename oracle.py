@@ -705,17 +705,13 @@ def hacer_login(driver, force_login=False):
         log.info("🔐 Forzando renovación de cookies (force_login=True)...")
         renovar_cookies_manual()
 
-    log.info("🌐 Abriendo Oracle con cookies guardadas...")
-    driver.get(URL_ORACLE)
-    try:
-        WebDriverWait(driver, 10).until(
-            lambda d: d.execute_script("return document.readyState") == "complete"
-        )
-    except Exception:
-        pass
-
+    # Igual que BotCCOT: inyectar cookies ANTES de navegar a Oracle
+    # cargar_cookies() visita el dominio, inyecta las cookies, y luego
+    # navegamos a Oracle con las cookies ya presentes → no hay redirect a Microsoft
+    log.info("🍪 Cargando cookies antes de navegar a Oracle...")
     if cargar_cookies(driver):
-        driver.refresh()
+        log.info("🌐 Navegando a Oracle con cookies ya cargadas...")
+        driver.get(URL_ORACLE)
         try:
             WebDriverWait(driver, 30).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, SEL_BARRA_BUSQUEDA))
@@ -724,9 +720,7 @@ def hacer_login(driver, force_login=False):
             return True
         except TimeoutException:
             pass
-        log.warning("⚠️ WebDriverWait no detectó Oracle — puede ser carga lenta, continuando...")
-        # No borrar cookies aquí — ensure_session ya las validó vía HTTP
-        # Devolver True para que el bot intente operar igual
+        log.warning("⚠️ Oracle no cargó la barra de búsqueda en 30s, continuando...")
         return True
 
 
