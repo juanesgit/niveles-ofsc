@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 
 from dotenv import load_dotenv
-from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type, retry_if_exception
 
 import shutil
 import tempfile
@@ -18,7 +18,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.common.exceptions import TimeoutException, WebDriverException, NoSuchDriverException
 
 # ─────────────────────────────────────────────────────
 # ENTORNO
@@ -207,7 +207,7 @@ def _crear_chrome(headless: bool = False, login_temp: bool = False) -> webdriver
         data_dir.mkdir(parents=True, exist_ok=True)
     options.add_argument(f"--user-data-dir={data_dir}")
 
-    # Igual que BotCCOT: intentar primero con chromedriver del PATH
+    # Intentar primero con chromedriver del PATH (LXC tiene chromedriver instalado)
     pth = shutil.which("chromedriver")
     if pth:
         try:
@@ -215,13 +215,8 @@ def _crear_chrome(headless: bool = False, login_temp: bool = False) -> webdriver
             return driver
         except Exception:
             pass
-    # Fallback: Selenium Manager (descarga automática si hay internet)
-    try:
-        driver = webdriver.Chrome(options=options)
-        return driver
-    except Exception:
-        pass
-    driver = webdriver.Chrome(service=Service("chromedriver"), options=options)
+    # Selenium Manager descarga chromedriver automáticamente si hay internet
+    driver = webdriver.Chrome(options=options)
     return driver
 
 
@@ -733,7 +728,7 @@ def hacer_login(driver, force_login=False):
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_fixed(5),
-    retry=retry_if_exception_type(WebDriverException),
+    retry=retry_if_exception(lambda e: isinstance(e, WebDriverException) and not isinstance(e, NoSuchDriverException)),
     reraise=True,
 )
 def buscar_cuenta(cuenta, force_login=False):
