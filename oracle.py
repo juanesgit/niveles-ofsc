@@ -179,7 +179,7 @@ def _crear_chrome(headless: bool = False, login_temp: bool = False) -> webdriver
             pass
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--remote-debugging-port=0")
+    options.add_argument("--remote-debugging-port=9222")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-first-run")
     options.add_argument("--disable-blink-features=AutomationControlled")
@@ -217,6 +217,34 @@ def _crear_chrome(headless: bool = False, login_temp: bool = False) -> webdriver
     return driver
 
 
+def _conectar_chrome_existente():
+    """Intenta conectar a un Chrome ya corriendo via remote debugging (localhost:9222)."""
+    try:
+        import socket
+        sock = socket.create_connection(("localhost", 9222), timeout=2)
+        sock.close()
+    except Exception:
+        return None
+
+    try:
+        options = webdriver.ChromeOptions()
+        options.add_experimental_option("debuggerAddress", "localhost:9222")
+        # Intentar con chromedriver del PATH primero
+        pth = shutil.which("chromedriver")
+        if pth:
+            try:
+                driver = webdriver.Chrome(service=Service(pth), options=options)
+            except Exception:
+                driver = webdriver.Chrome(options=options)
+        else:
+            driver = webdriver.Chrome(options=options)
+        log.info("🔄 Conectado a Chrome existente via remote debugging (localhost:9222)")
+        return driver
+    except Exception as e:
+        log.warning(f"⚠️ No se pudo conectar a Chrome existente: {e}")
+        return None
+
+
 def obtener_driver():
     global _driver
 
@@ -233,6 +261,22 @@ def obtener_driver():
                 except Exception:
                     pass
                 _driver = None
+
+        # Intentar conectar a Chrome existente del login manual
+        _driver = _conectar_chrome_existente()
+        if _driver is not None:
+            try:
+                _driver.execute_script("""
+                    Object.defineProperty(
+                        navigator,
+                        'webdriver',
+                        { get: () => undefined }
+                    )
+                """)
+            except Exception:
+                pass
+            log.info("✅ Chrome reutilizado con sesión SSO existente")
+            return _driver
 
         # ⭐ DETECTAR SI HAY COOKIES GUARDADAS ⭐
         hay_cookies = os.path.exists(COOKIES_FILE)
@@ -255,7 +299,7 @@ def obtener_driver():
         else:
             modo_headless = (os.environ.get("DISPLAY") is None)
         if modo_headless:
-            log.info("� Iniciando Chrome HEADLESS (Linux/LXC)")
+            log.info(" Iniciando Chrome HEADLESS (Linux/LXC)")
         else:
             log.info("🚀 Iniciando Chrome VISIBLE (DISPLAY detectado — sesión SSO persistente)")
 

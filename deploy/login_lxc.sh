@@ -2,8 +2,10 @@
 # ══════════════════════════════════════════════════════════════════
 #  niveles-ofsc — Login manual de cookies en el LXC (Xvfb + VNC)
 #
-#  Inicia Xvfb (display virtual), fluxbox (window manager) y x11vnc.
-#  Conectate desde tu PC via VNC: vncviewer <ip-lxc>:5900
+#  Usa el Xvfb persistente del servicio niveles-ofsc-xvfb.
+#  Inicia fluxbox + x11vnc para que el usuario pueda hacer MFA.
+#  Al finalizar, Chrome sigue corriendo y el bot se conecta al mismo
+#  proceso via remote debugging.
 #
 #  Uso:
 #    bash /root/niveles-ofsc/deploy/login_lxc.sh
@@ -22,28 +24,17 @@ info() { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn() { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
-# Verificar que no esté corriendo
-if pgrep -f "Xvfb.*$DISPLAY_NUM" >/dev/null; then
-    warn "Xvfb ya está corriendo en display $DISPLAY"
-    warn "Deteniendo procesos existentes..."
-    pkill -f "Xvfb.*$DISPLAY_NUM" || true
-    pkill -f "x11vnc.*$VNC_PORT" || true
-    pkill -f "fluxbox" || true
-    sleep 2
-fi
-
-info "Deteniendo bot y Xvfb temporalmente..."
+info "Deteniendo bot..."
 systemctl stop "$SERVICE_NAME" || true
-systemctl stop niveles-ofsc-xvfb || true
 sleep 2
 
-info "Iniciando Xvfb (display virtual)..."
-Xvfb "$DISPLAY" -screen 0 1920x1080x24 &
-XVFB_PID=$!
+info "Asegurando Xvfb persistente..."
+systemctl start niveles-ofsc-xvfb || true
 sleep 2
 
 info "Iniciando fluxbox (window manager)..."
 DISPLAY="$DISPLAY" fluxbox &
+FLUXBOX_PID=$!
 sleep 2
 
 info "Iniciando x11vnc (puerto $VNC_PORT)..."
@@ -67,16 +58,15 @@ cd "$INSTALL_DIR"
 DISPLAY="$DISPLAY" "$VENV_DIR/bin/python" oracle.py --login
 RC=$?
 
-# Limpieza
-info "Deteniendo Xvfb, fluxbox y x11vnc..."
-kill $XVFB_PID $VNC_PID 2>/dev/null || true
-pkill -f "Xvfb.*$DISPLAY_NUM" || true
+# Limpieza: solo fluxbox y x11vnc. Xvfb y Chrome deben seguir corriendo.
+info "Deteniendo fluxbox y x11vnc (Xvfb y Chrome siguen corriendo)..."
+kill $FLUXBOX_PID $VNC_PID 2>/dev/null || true
 pkill -f "x11vnc.*$VNC_PORT" || true
 pkill -f "fluxbox" || true
 
 if [[ $RC -eq 0 ]]; then
     info "Cookies renovadas correctamente."
-    info "Reiniciando bot..."
+    info "Iniciando bot (se conectará al Chrome existente)..."
     systemctl start "$SERVICE_NAME"
     sleep 2
     systemctl status "$SERVICE_NAME" --no-pager -l
