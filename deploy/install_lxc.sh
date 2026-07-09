@@ -39,7 +39,8 @@ info "[1/6] Instalando dependencias del sistema..."
 apt-get update -qq
 apt-get install -y -qq \
     python3 python3-pip python3-venv git \
-    wget curl unzip gnupg ca-certificates
+    wget curl unzip gnupg ca-certificates \
+    xvfb x11vnc fluxbox
 
 # ── 2. Google Chrome (igual que BotCCOT) ─────────────────────────
 info "[2/6] Verificando Google Chrome..."
