@@ -32,8 +32,9 @@ if pgrep -f "Xvfb.*$DISPLAY_NUM" >/dev/null; then
     sleep 2
 fi
 
-info "Deteniendo bot temporalmente..."
+info "Deteniendo bot y Xvfb temporalmente..."
 systemctl stop "$SERVICE_NAME" || true
+systemctl stop niveles-ofsc-xvfb || true
 sleep 2
 
 info "Iniciando Xvfb (display virtual)..."

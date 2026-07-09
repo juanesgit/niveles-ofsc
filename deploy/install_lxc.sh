@@ -84,12 +84,29 @@ python3 -m venv "$VENV_DIR"
 "$VENV_DIR/bin/pip" install -r "$INSTALL_DIR/requirements.txt" -q
 info "  Dependencias instaladas en $VENV_DIR"
 
-# ── 5. Systemd service ────────────────────────────────────────────
-info "[5/6] Creando servicio systemd: $SERVICE_NAME..."
+# ── 5. Systemd service Xvfb (display virtual persistente) ─────────
+info "[5/6] Creando servicios systemd: Xvfb + $SERVICE_NAME..."
+cat > "/etc/systemd/system/niveles-ofsc-xvfb.service" <<EOF
+[Unit]
+Description=Xvfb display virtual para niveles-ofsc
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/Xvfb :99 -screen 0 1920x1080x24
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=Niveles OFSC — Bot Telegram Oracle
-After=network.target
+After=network.target niveles-ofsc-xvfb.service
+Requires=niveles-ofsc-xvfb.service
 Wants=network-online.target
 
 [Service]
@@ -97,6 +114,7 @@ Type=simple
 User=root
 WorkingDirectory=$INSTALL_DIR
 EnvironmentFile=$INSTALL_DIR/.env
+Environment="DISPLAY=:99"
 ExecStart=$VENV_DIR/bin/python -u telegram_bot.py
 Restart=always
 RestartSec=10
@@ -107,9 +125,10 @@ StandardError=append:$LOG_DIR/bot.log
 WantedBy=multi-user.target
 EOF
 
-# ── 6. Habilitar servicio ─────────────────────────────────────────
-info "[6/6] Habilitando servicio systemd..."
+# ── 6. Habilitar servicios ────────────────────────────────────────
+info "[6/6] Habilitando servicios systemd..."
 systemctl daemon-reload
+systemctl enable niveles-ofsc-xvfb.service
 systemctl enable "$SERVICE_NAME.service"
 
 echo ""

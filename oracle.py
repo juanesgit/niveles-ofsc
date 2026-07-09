@@ -248,12 +248,16 @@ def obtener_driver():
             except Exception:
                 pass
 
-        # En LXC/Linux sin display → headless. En Windows → visible (para MFA si es necesario)
-        modo_headless = (os.name != "nt")
+        # En LXC/Linux: visible si hay DISPLAY (Xvfb persistente), headless si no.
+        # En Windows: siempre visible.
+        if os.name == "nt":
+            modo_headless = False
+        else:
+            modo_headless = (os.environ.get("DISPLAY") is None)
         if modo_headless:
             log.info("� Iniciando Chrome HEADLESS (Linux/LXC)")
         else:
-            log.info("🚀 Iniciando Chrome VISIBLE (Windows — MFA disponible si es necesario)")
+            log.info("🚀 Iniciando Chrome VISIBLE (DISPLAY detectado — sesión SSO persistente)")
 
         _driver = _crear_chrome(headless=modo_headless)
 
