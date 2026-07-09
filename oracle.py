@@ -193,24 +193,15 @@ def _crear_chrome(headless: bool = False, login_temp: bool = False) -> webdriver
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
 
-    if login_temp:
-        # Login: perfil persistente para guardar sesión SSO
-        data_dir = Path(BROWSER_PERFIL)
-        data_dir.mkdir(parents=True, exist_ok=True)
-        # Limpiar lock files que bloquean si Chrome cerró mal
-        for lock in ["SingletonLock", "SingletonCookie", "SingletonSocket"]:
-            try:
-                (data_dir / lock).unlink(missing_ok=True)
-            except Exception:
-                pass
-    else:
-        # Búsquedas: directorio temporal SIEMPRE limpio — cookies via CDP
-        if os.name != "nt":
-            data_dir = Path("/tmp/oracle-chrome-data")
-        else:
-            data_dir = Path(tempfile.gettempdir()) / "oracle-chrome-data"
-        shutil.rmtree(data_dir, ignore_errors=True)
-        data_dir.mkdir(parents=True, exist_ok=True)
+    # Login y búsquedas: ambos usan perfil persistente para mantener sesión SSO
+    data_dir = Path(BROWSER_PERFIL)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    # Limpiar lock files que bloquean si Chrome cerró mal
+    for lock in ["SingletonLock", "SingletonCookie", "SingletonSocket"]:
+        try:
+            (data_dir / lock).unlink(missing_ok=True)
+        except Exception:
+            pass
     options.add_argument(f"--user-data-dir={data_dir}")
 
     # Intentar primero con chromedriver del PATH (LXC tiene chromedriver instalado)

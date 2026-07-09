@@ -53,7 +53,11 @@ sleep 2
 info "════════════════════════════════════════════════════════"
 info "  VNC SERVER ACTIVO"
 info "  Conectate desde tu PC:"
-warn "    vncviewer $(hostname -I | awk '{print $1}'):$VNC_PORT"
+warn "    vncviewer <IP-LXC>:$VNC_PORT"
+info "  IPs disponibles:"
+hostname -I | tr ' ' '\n' | while read ip; do
+    [[ -n "$ip" ]] && warn "    - $ip:$VNC_PORT"
+done
 info "════════════════════════════════════════════════════════"
 warn "  Presiona Ctrl+C en este script cuando termines el login"
 echo ""
